@@ -1,0 +1,139 @@
+package com.example.genaisdk.structuredoutputs;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.genaisdk.dto.flight.FlightBooking;
+import com.example.genaisdk.dto.UserInput;
+import com.example.genaisdk.dto.soccer.SoccerTeam;
+import com.example.genaisdk.utils.CommonUtils;
+import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.ai.converter.MapOutputConverter;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.Resource;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+import java.util.Map;
+
+@RestController
+public class StructuredOutputsController {
+
+    private static final Logger log = LoggerFactory.getLogger(StructuredOutputsController.class);
+
+    private final ChatClient chatClient;
+
+    private final ObjectMapper objectMapper;
+
+    public StructuredOutputsController(ChatClient.Builder chatClientBuilder, ObjectMapper objectMapper) {
+        this.chatClient = chatClientBuilder.build();
+        this.objectMapper = objectMapper;
+    }
+
+    @Value("classpath:/prompt-templates/structured_outputs/flight_details.st")
+    private Resource flightBooking;
+
+    @Value("classpath:/prompt-templates/structured_outputs/flight_details_fewshot.st")
+    private Resource flightBookingFewShot;
+
+
+
+    @PostMapping("/v1/structured_outputs")
+    public String structuredOutputs(@RequestBody @Valid UserInput userInput) {
+
+        log.info("userInput message : {} ", userInput);
+        var message = new UserMessage(userInput.prompt());
+        var promptMessage = new Prompt(List.of(message));
+
+        var requestSpec = chatClient.prompt(promptMessage);
+
+        log.info("requestSpec : {} ", requestSpec);
+        var responseSpec = requestSpec.call();
+        return responseSpec.content();
+    }
+
+    @PostMapping("/v1/structured_outputs/fewshot")
+    public String structuredOutputsFewShot(@RequestBody @Valid UserInput userInput) {
+
+        log.info("userInput message : {} ", userInput);
+
+        var promptTemplate = new PromptTemplate(flightBookingFewShot);
+        var message = promptTemplate.createMessage(Map.of("input", userInput.prompt(), "jsonexample",
+                CommonUtils.flightJson()));
+
+        var promptMessage = new Prompt((List.of(message)));
+
+        var requestSpec = chatClient.prompt(promptMessage);
+
+        log.info("requestSpec : {} ", requestSpec);
+        var responseSpec = requestSpec.call();
+        return responseSpec.content();
+    }
+
+    @PostMapping("/v1/structured_outputs/entity")
+    public FlightBooking structuredOutputsFewEntity(@RequestBody @Valid UserInput userInput) {
+
+        log.info("userInput message : {} ", userInput);
+
+        var promptTemplate = new PromptTemplate(flightBooking);
+        var message = promptTemplate.createMessage(Map.of("input", userInput.prompt()));
+
+        var promptMessage = new Prompt((List.of(message)));
+
+        var booking = chatClient.prompt(promptMessage)
+                .call()
+                .entity(FlightBooking.class);
+
+        log.info("booking : {} ", booking);
+        return booking;
+    }
+
+    @PostMapping("/v1/structured_outputs/entity/list")
+    public List<SoccerTeam> entityList(@RequestBody @Valid UserInput userInput) {
+
+        log.info("userInput message : {} ", userInput);
+
+        var message = new UserMessage(userInput.prompt());
+
+        var promptMessage = new Prompt((List.of(message)));
+
+        var soccerTeams = chatClient.prompt(promptMessage)
+                .call()
+                .entity(new ParameterizedTypeReference<List<SoccerTeam>>() {
+                });
+
+        log.info("booking : {} ", soccerTeams);
+        return soccerTeams;
+    }
+
+    @PostMapping("/v1/structured_outputs/entity/map")
+    public Map<String, Object> entityMap(@RequestBody @Valid UserInput userInput) {
+
+        log.info("userInput message : {} ", userInput);
+
+        MapOutputConverter mapOutputConverter = new MapOutputConverter();
+        String format = mapOutputConverter.getFormat();
+        String template = """
+                Input: {input}
+                {format}
+                """;
+        var promptTemplate = new PromptTemplate(template);
+        var message = promptTemplate.createMessage(Map.of("input", userInput.prompt(), "format", format));
+        var promptMessage = new Prompt(List.of(message));
+
+        var soccerTeamsMap = chatClient.prompt(promptMessage)
+                .call()
+                .content();
+
+        log.info("soccerTeamsByMap : {} ", soccerTeamsMap);
+        var result = mapOutputConverter.convert(soccerTeamsMap);
+        return result;
+    }
+}
